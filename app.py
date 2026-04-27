@@ -1,170 +1,182 @@
 import streamlit as st
 import pandas as pd
-import time
 from openai import OpenAI
 
 # =========================
 # CONFIG
 # =========================
-st.set_page_config(page_title="AI Sales System", layout="wide")
+st.set_page_config(
+    page_title="AI Sales Intelligence",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Load API key
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
+# =========================
+# CUSTOM CSS (UI MAGIC)
+# =========================
+st.markdown("""
+<style>
+.main {
+    background-color: #0e1117;
+}
+.stButton>button {
+    background-color: #4CAF50;
+    color: white;
+    border-radius: 10px;
+    padding: 0.6em 1.2em;
+    font-weight: 600;
+}
+.card {
+    background-color: #1c1f26;
+    padding: 20px;
+    border-radius: 12px;
+    margin-bottom: 15px;
+}
+.small-text {
+    color: #9ca3af;
+    font-size: 13px;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # =========================
 # HEADER
 # =========================
-st.title("🚀 AI B2B Sales Generator")
-st.caption("Generate companies, roles & outreach messages instantly")
+st.title("🚀 AI Sales Intelligence Dashboard")
+st.markdown("Generate **target companies, roles, and outreach messages** with AI")
 
 # =========================
-# SIDEBAR (Controls)
+# SIDEBAR
 # =========================
-st.sidebar.header("⚙️ Controls")
+st.sidebar.header("⚙️ Campaign Settings")
 
 industry = st.sidebar.selectbox(
-    "Select Industry",
+    "Industry",
     ["Pharma", "Food", "Textile", "Oil & Gas", "Chemical", "Cement"]
 )
 
-num_companies = st.sidebar.slider("Number of Companies", 5, 25, 10)
+num_companies = st.sidebar.slider("Companies", 3, 10, 5)
 
 tone = st.sidebar.selectbox(
-    "Message Tone",
+    "Tone",
     ["Professional", "Friendly", "Direct"]
 )
 
 # =========================
 # AI FUNCTIONS
 # =========================
-
 def generate_companies(industry, n):
     prompt = f"""
     List {n} real companies in Pakistan in the {industry} industry.
-    Only return names in a clean bullet list.
+    Only return names.
     """
 
-    response = client.chat.completions.create(
-        model="gpt-4.1",
+    res = client.chat.completions.create(
+        model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}]
     )
 
-    text = response.choices[0].message.content
-    return [line.strip("- ").strip() for line in text.split("\n") if line.strip()]
+    return [
+        c.strip("- ").strip()
+        for c in res.choices[0].message.content.split("\n")
+        if c.strip()
+    ]
 
 
-def generate_roles(company):
+def generate_leads(company, industry, tone):
     prompt = f"""
-    List 3 job roles responsible for procurement in {company}.
+    For {company} in {industry}:
+
+    Give 2 roles responsible for procurement.
+    For each role write a short {tone.lower()} outreach message.
+
+    Format:
+    Role: ...
+    Message: ...
     """
 
-    response = client.chat.completions.create(
-        model="gpt-4.1",
+    res = client.chat.completions.create(
+        model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}]
     )
 
-    text = response.choices[0].message.content
-    return [r.strip("- ").strip() for r in text.split("\n") if r.strip()]
-
-
-def generate_message(name, company, industry, role, tone):
-    prompt = f"""
-    Write a {tone.lower()} cold outreach message.
-
-    Person: {name}
-    Role: {role}
-    Company: {company}
-    Industry: {industry}
-
-    Context:
-    We supply stainless steel pipes, fittings, valves.
-
-    Keep it short, human, and not spammy.
-    """
-
-    response = client.chat.completions.create(
-        model="gpt-4.1",
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    return response.choices[0].message.content
+    return res.choices[0].message.content
 
 
 # =========================
-# GENERATE BUTTON
+# TABS (CLEAN UX)
 # =========================
-if st.button("🔥 Generate Leads"):
+tab1, tab2 = st.tabs(["📊 Generate Leads", "📁 Results"])
 
-    with st.spinner("Generating companies..."):
-        companies = generate_companies(industry, num_companies)
+# =========================
+# TAB 1 — GENERATE
+# =========================
+with tab1:
 
-    data = []
-    progress_bar = st.progress(0)
+    st.markdown("### Generate AI Leads")
 
-    for i, company in enumerate(companies):
+    if st.button("🔥 Run AI Campaign"):
 
-        st.write(f"🔍 Processing: {company}")
+        with st.spinner("AI researching..."):
+            companies = generate_companies(industry, num_companies)
 
-        roles = generate_roles(company)
+        results = []
 
-        for role in roles:
-            name = "Procurement Manager"
+        progress = st.progress(0)
 
-            message = generate_message(name, company, industry, role, tone)
+        for i, company in enumerate(companies):
 
-            data.append({
+            st.markdown(f"<div class='card'>🔍 {company}</div>", unsafe_allow_html=True)
+
+            output = generate_leads(company, industry, tone)
+
+            results.append({
                 "Company": company,
-                "Role": role,
-                "Contact": name,
-                "Email": f"info@{company.replace(' ', '').lower()}.com",
-                "Message": message
+                "Output": output
             })
 
-            time.sleep(0.5)
+            progress.progress((i + 1) / len(companies))
 
-        progress_bar.progress((i + 1) / len(companies))
+        st.session_state["results"] = pd.DataFrame(results)
 
-    df = pd.DataFrame(data)
+        st.success("✅ Campaign Completed")
 
-    st.success("✅ Leads Generated!")
+# =========================
+# TAB 2 — RESULTS
+# =========================
+with tab2:
 
-    # =========================
-    # FILTER + SEARCH
-    # =========================
-    search = st.text_input("🔍 Search Company")
+    if "results" in st.session_state:
 
-    if search:
-        df = df[df["Company"].str.contains(search, case=False)]
+        df = st.session_state["results"]
 
-    # =========================
-    # TABLE VIEW
-    # =========================
-    st.dataframe(df, use_container_width=True)
+        # Metrics
+        col1, col2 = st.columns(2)
+        col1.metric("Companies Generated", len(df))
+        col2.metric("Total Messages", len(df) * 2)
 
-    # =========================
-    # EXPANDABLE MESSAGE VIEW
-    # =========================
-    st.subheader("📩 Messages")
+        st.markdown("---")
 
-    for i, row in df.iterrows():
-        with st.expander(f"{row['Company']} — {row['Role']}"):
-            st.write(row["Message"])
+        # Search
+        search = st.text_input("🔍 Search company")
 
-            st.code(row["Message"])
+        if search:
+            df = df[df["Company"].str.contains(search, case=False)]
 
-            st.button(
-                f"📋 Copy Message {i}",
-                on_click=lambda msg=row["Message"]: st.write("Copied!")
-            )
+        # Display cards instead of ugly table
+        for i, row in df.iterrows():
+            st.markdown(f"""
+            <div class="card">
+                <h4>{row['Company']}</h4>
+                <p class="small-text">{row['Output']}</p>
+            </div>
+            """, unsafe_allow_html=True)
 
-    # =========================
-    # DOWNLOAD
-    # =========================
-    csv = df.to_csv(index=False).encode('utf-8')
+        # Download
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Download CSV", csv, "leads.csv")
 
-    st.download_button(
-        "⬇️ Download CSV",
-        csv,
-        "leads.csv",
-        "text/csv"
-    )
+    else:
+        st.info("No data yet. Run a campaign first.")
