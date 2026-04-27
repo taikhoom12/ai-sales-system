@@ -6,7 +6,7 @@ import time
 # =========================
 # CONFIG
 # =========================
-openai.api_key = "YOUR_OPENAI_API_KEY"
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 st.set_page_config(page_title="AI Sales System", layout="wide")
 
