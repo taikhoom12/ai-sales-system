@@ -1,26 +1,38 @@
 import streamlit as st
-import openai
 import pandas as pd
 import time
+from openai import OpenAI
 
 # =========================
 # CONFIG
 # =========================
-openai.api_key = st.secrets["OPENAI_API_KEY"]
-
 st.set_page_config(page_title="AI Sales System", layout="wide")
 
-st.title("🚀 AI B2B Sales Generator")
+# Load API key
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # =========================
-# INPUTS
+# HEADER
 # =========================
-industry = st.selectbox(
+st.title("🚀 AI B2B Sales Generator")
+st.caption("Generate companies, roles & outreach messages instantly")
+
+# =========================
+# SIDEBAR (Controls)
+# =========================
+st.sidebar.header("⚙️ Controls")
+
+industry = st.sidebar.selectbox(
     "Select Industry",
     ["Pharma", "Food", "Textile", "Oil & Gas", "Chemical", "Cement"]
 )
 
-num_companies = st.slider("Number of Companies", 5, 30, 10)
+num_companies = st.sidebar.slider("Number of Companies", 5, 25, 10)
+
+tone = st.sidebar.selectbox(
+    "Message Tone",
+    ["Professional", "Friendly", "Direct"]
+)
 
 # =========================
 # AI FUNCTIONS
@@ -29,18 +41,16 @@ num_companies = st.slider("Number of Companies", 5, 30, 10)
 def generate_companies(industry, n):
     prompt = f"""
     List {n} real companies in Pakistan in the {industry} industry.
-    Only return names in a clean list.
+    Only return names in a clean bullet list.
     """
 
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4.1",
         messages=[{"role": "user", "content": prompt}]
     )
 
-    text = response['choices'][0]['message']['content']
-    companies = [line.strip("- ").strip() for line in text.split("\n") if line.strip()]
-    
-    return companies
+    text = response.choices[0].message.content
+    return [line.strip("- ").strip() for line in text.split("\n") if line.strip()]
 
 
 def generate_roles(company):
@@ -48,20 +58,18 @@ def generate_roles(company):
     List 3 job roles responsible for procurement in {company}.
     """
 
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4.1",
         messages=[{"role": "user", "content": prompt}]
     )
 
-    text = response['choices'][0]['message']['content']
-    roles = [r.strip("- ").strip() for r in text.split("\n") if r.strip()]
-    
-    return roles
+    text = response.choices[0].message.content
+    return [r.strip("- ").strip() for r in text.split("\n") if r.strip()]
 
 
-def generate_message(name, company, industry, role):
+def generate_message(name, company, industry, role, tone):
     prompt = f"""
-    Write a short professional cold outreach message.
+    Write a {tone.lower()} cold outreach message.
 
     Person: {name}
     Role: {role}
@@ -71,15 +79,15 @@ def generate_message(name, company, industry, role):
     Context:
     We supply stainless steel pipes, fittings, valves.
 
-    Keep it concise, natural, not spammy.
+    Keep it short, human, and not spammy.
     """
 
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4.1",
         messages=[{"role": "user", "content": prompt}]
     )
 
-    return response['choices'][0]['message']['content']
+    return response.choices[0].message.content
 
 
 # =========================
@@ -87,22 +95,22 @@ def generate_message(name, company, industry, role):
 # =========================
 if st.button("🔥 Generate Leads"):
 
-    st.write("Generating companies...")
-    companies = generate_companies(industry, num_companies)
+    with st.spinner("Generating companies..."):
+        companies = generate_companies(industry, num_companies)
 
     data = []
-
-    progress = st.progress(0)
+    progress_bar = st.progress(0)
 
     for i, company in enumerate(companies):
-        st.write(f"Processing: {company}")
+
+        st.write(f"🔍 Processing: {company}")
 
         roles = generate_roles(company)
 
         for role in roles:
             name = "Procurement Manager"
 
-            message = generate_message(name, company, industry, role)
+            message = generate_message(name, company, industry, role, tone)
 
             data.append({
                 "Company": company,
@@ -112,18 +120,48 @@ if st.button("🔥 Generate Leads"):
                 "Message": message
             })
 
-            time.sleep(1)
+            time.sleep(0.5)
 
-        progress.progress((i + 1) / len(companies))
+        progress_bar.progress((i + 1) / len(companies))
 
     df = pd.DataFrame(data)
 
-    st.success("✅ Done!")
+    st.success("✅ Leads Generated!")
 
-    st.dataframe(df)
+    # =========================
+    # FILTER + SEARCH
+    # =========================
+    search = st.text_input("🔍 Search Company")
 
-    # Download button
+    if search:
+        df = df[df["Company"].str.contains(search, case=False)]
+
+    # =========================
+    # TABLE VIEW
+    # =========================
+    st.dataframe(df, use_container_width=True)
+
+    # =========================
+    # EXPANDABLE MESSAGE VIEW
+    # =========================
+    st.subheader("📩 Messages")
+
+    for i, row in df.iterrows():
+        with st.expander(f"{row['Company']} — {row['Role']}"):
+            st.write(row["Message"])
+
+            st.code(row["Message"])
+
+            st.button(
+                f"📋 Copy Message {i}",
+                on_click=lambda msg=row["Message"]: st.write("Copied!")
+            )
+
+    # =========================
+    # DOWNLOAD
+    # =========================
     csv = df.to_csv(index=False).encode('utf-8')
+
     st.download_button(
         "⬇️ Download CSV",
         csv,
